@@ -19,6 +19,7 @@ const TSJE = error{
 };
 
 fn i64InIntegerRange(comptime int_type: TypeInfo.Int, value: i64) bool {
+    // TODO Actually check signedness and range for smaller types
     return true;
 }
 
@@ -169,7 +170,7 @@ pub fn main() !void {
     std.debug.warn("\n{}\n", result);
 }
 
-test "basic add functionality" {
+test "test all features that work" {
     std.debug.warn("Actually running test\n");
     var p = json.Parser.init(std.debug.global_allocator, false);
     defer p.deinit();
@@ -182,23 +183,3 @@ test "basic add functionality" {
     var result = try tsjson(TestStruct, tree.root);
     std.debug.warn("\n{}\n", result);
 }
-
-const TestStruct2 = struct {
-    image: Image,
-};
-
-const Image = struct {
-    width: i32,
-    height: i32,
-    title: []const u8,
-    thumbnail: Thumbnail,
-    animated: bool,
-    ids: ArrayList(i32),
-    double: f64,
-};
-
-const Thumbnail = struct {
-    url: []const u8,
-    height: i32,
-    width: i32,
-};
