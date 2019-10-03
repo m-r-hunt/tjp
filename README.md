@@ -50,7 +50,7 @@ TJP uses comptime reflection to inspect the types passed to it, and generate the
 ## Type mappings
 
 | Zig Type | JSON Type |
-------------------------
+|----------|-----------|
 | Any integer | JSON Integer as parsed by std.JSON. Checked to fit in given size/signedness |
 | Any float | JSON Integer or Float as parsed by std.JSON. Converted by @intToFloat or @FloatCast respectively |
 | Optional | underlying type or null. Key may be omitted from JSON encoded structs (in which case the optional will be null) |
