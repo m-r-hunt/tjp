@@ -183,3 +183,32 @@ test "test all features that work" {
     var result = try tsjson(TestStruct, tree.root);
     std.debug.warn("\n{}\n", result);
 }
+
+test "test README example" {
+    const ExampleStruct = struct {
+        an_int: i32,
+        a_float: f32,
+        optional: ?i32,
+        an_array: [4]i32,
+        nested_struct: struct {
+            another_int: i32,
+        },
+    };
+    var p = json.Parser.init(std.debug.global_allocator, false);
+    defer p.deinit();
+
+    const s =
+        \\{
+        \\ "an_int": 1,
+        \\ "a_float": 3.5,
+        \\ 
+        \\ "an_array": [1, 2, 3, 4],
+        \\ "nested_struct": {"another_int": 6}
+        \\}
+    ;
+    var tree = try p.parse(s);
+    defer tree.deinit();
+
+    var result = try tsjson(ExampleStruct, tree.root);
+    std.debug.warn("\n{}\n", result);
+}
