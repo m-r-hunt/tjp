@@ -5,6 +5,7 @@ const ArrayList = std.ArrayList;
 const StringHashMap = std.StringHashMap;
 const math = std.math;
 const TypeInfo = @import("builtin").TypeInfo;
+const Allocator = std.mem.Allocator;
 
 const UnmarshalJSONError = error{
     JSONMissingObjectField,
@@ -196,22 +197,22 @@ test "Test isStringHashMap" {
     testing.expect(isStringHashMap(OtherHashMap) == null);
 }
 
-fn unmarshalOptional(comptime T: type, value: json.Value) UnmarshalJSONError!?T {
+fn unmarshalOptional(comptime T: type, value: json.Value, allocator: *Allocator) UnmarshalJSONError!?T {
     // Things seem to get confused badly if you mix up UnmarshalJSONError!T and UnmarshalJSONError!?T so we need to be careful here.
-    if (unmarshal(T, value)) |val| {
+    if (unmarshal(T, value, allocator)) |val| {
         return val;
     } else |err| {
         return err;
     }
 }
 
-fn unmarshalArray(comptime T: type, comptime array_type: TypeInfo.Array, value: json.Value) UnmarshalJSONError!T {
+fn unmarshalArray(comptime T: type, comptime array_type: TypeInfo.Array, value: json.Value, allocator: *Allocator) UnmarshalJSONError!T {
     switch (value) {
         .Array => |array| {
             if (array.count() == array_type.len) {
                 var ret: T = undefined;
                 for (array.toSlice()) |val, i| {
-                    ret[i] = try unmarshal(array_type.child, val);
+                    ret[i] = try unmarshal(array_type.child, val, allocator);
                 }
                 return ret;
             } else {
@@ -222,13 +223,13 @@ fn unmarshalArray(comptime T: type, comptime array_type: TypeInfo.Array, value: 
     }
 }
 
-fn unmarshalStruct(comptime T: type, comptime struct_type: TypeInfo.Struct, value: json.Value) UnmarshalJSONError!T {
+fn unmarshalStruct(comptime T: type, comptime struct_type: TypeInfo.Struct, value: json.Value, allocator: *Allocator) UnmarshalJSONError!T {
     if (isArrayList(T)) |item_type| {
         switch (value) {
             .Array => |a| {
-                var ret = ArrayList(item_type).init(std.debug.global_allocator);
+                var ret = ArrayList(item_type).init(allocator);
                 for (a.toSlice()) |array_val| {
-                    try ret.append(try unmarshal(item_type, array_val)) catch error.JSONArrayListError;
+                    try ret.append(try unmarshal(item_type, array_val, allocator)) catch error.JSONArrayListError;
                 }
                 return ret;
             },
@@ -237,10 +238,10 @@ fn unmarshalStruct(comptime T: type, comptime struct_type: TypeInfo.Struct, valu
     } else if (isStringHashMap(T)) |item_type| {
         switch (value) {
             .Object => |o| {
-                var ret = StringHashMap(item_type).init(std.debug.global_allocator);
+                var ret = StringHashMap(item_type).init(allocator);
                 var it = o.iterator();
                 while (it.next()) |kv| {
-                    _ = try ret.put(kv.key, try unmarshal(item_type, kv.value)) catch error.JSONStringHashMapError;
+                    _ = try ret.put(kv.key, try unmarshal(item_type, kv.value, allocator)) catch error.JSONStringHashMapError;
                 }
                 return ret;
             },
@@ -256,7 +257,7 @@ fn unmarshalStruct(comptime T: type, comptime struct_type: TypeInfo.Struct, valu
                 var any_missing = false;
                 inline for (struct_type.fields) |field| {
                     if (o.getValue(field.name)) |val| {
-                        @field(ret, field.name) = try unmarshal(field.field_type, val);
+                        @field(ret, field.name) = try unmarshal(field.field_type, val, allocator);
                     } else {
                         if (comptime isOptional(field.field_type)) {
                             @field(ret, field.name) = null;
@@ -326,7 +327,7 @@ fn unmarshalEnum(comptime T: type, comptime enum_type: TypeInfo.Enum, value: jso
     }
 }
 
-fn unmarshalUnion(comptime T: type, comptime union_type: TypeInfo.Union, value: json.Value) UnmarshalJSONError!T {
+fn unmarshalUnion(comptime T: type, comptime union_type: TypeInfo.Union, value: json.Value, allocator: *Allocator) UnmarshalJSONError!T {
     if (union_type.tag_type) |tag_type| {
         const JSONTagType = @TagType(json.Value);
         if (JSONTagType(value) != JSONTagType.Object) {
@@ -343,7 +344,7 @@ fn unmarshalUnion(comptime T: type, comptime union_type: TypeInfo.Union, value: 
         }
         inline for (union_type.fields) |field| {
             if (field.enum_field.?.value == @enumToInt(tag)) {
-                var result = try unmarshal(field.field_type, union_value.?);
+                var result = try unmarshal(field.field_type, union_value.?, allocator);
                 return @unionInit(T, field.name, result);
             }
         }
@@ -366,7 +367,7 @@ fn unmarshalPointer(comptime T: type, comptime pointer_type: TypeInfo.Pointer, v
     }
 }
 
-fn unmarshal(comptime T: type, value: json.Value) UnmarshalJSONError!T {
+fn unmarshal(comptime T: type, value: json.Value, allocator: *Allocator) UnmarshalJSONError!T {
     const type_info = @typeInfo(T);
     return switch (type_info) {
         .Bool => switch (value) {
@@ -398,11 +399,11 @@ fn unmarshal(comptime T: type, value: json.Value) UnmarshalJSONError!T {
             else => error.JSONExpectedNumber,
         },
         .Pointer => |pointer_type| unmarshalPointer(T, pointer_type, value),
-        .Array => |array_type| unmarshalArray(T, array_type, value),
-        .Struct => |struct_type| unmarshalStruct(T, struct_type, value),
-        .Optional => |optional_type| unmarshalOptional(optional_type.child, value),
+        .Array => |array_type| unmarshalArray(T, array_type, value, allocator),
+        .Struct => |struct_type| unmarshalStruct(T, struct_type, value, allocator),
+        .Optional => |optional_type| unmarshalOptional(optional_type.child, value, allocator),
         .Enum => |enum_type| unmarshalEnum(T, enum_type, value),
-        .Union => |union_type| unmarshalUnion(T, union_type, value),
+        .Union => |union_type| unmarshalUnion(T, union_type, value, allocator),
         else => @compileError("Bad Type"),
     };
 }
@@ -448,7 +449,7 @@ test "test all features that work" {
     var tree = try p.parse(s);
     defer tree.deinit();
 
-    var result = try unmarshal(TestStruct, tree.root);
+    var result = try unmarshal(TestStruct, tree.root, std.debug.global_allocator);
     // TODO Rewrite this test. Probably as multiple tests.
 }
 
@@ -477,7 +478,7 @@ test "test README example" {
     var tree = try p.parse(s);
     defer tree.deinit();
 
-    var result = try unmarshal(ExampleStruct, tree.root);
+    var result = try unmarshal(ExampleStruct, tree.root, std.debug.global_allocator);
     testing.expect(result.an_int == 1);
     testing.expect(result.a_float == 3.5);
     testing.expect(std.mem.eql(i32, result.an_array, [_]i32{ 1, 2, 3, 4 }));
@@ -501,7 +502,7 @@ test "Test Union" {
     var tree = try p.parse(s);
     defer tree.deinit();
 
-    var result = try unmarshal(ExampleUnion, tree.root);
+    var result = try unmarshal(ExampleUnion, tree.root, std.debug.global_allocator);
     testing.expect(@TagType(ExampleUnion)(result) == @TagType(ExampleUnion).A);
     testing.expect(result.A == 42);
 }

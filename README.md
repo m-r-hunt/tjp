@@ -31,7 +31,7 @@ TJP is currently unfinished (see TODOs below), but starting to be functional.
     var tree = try p.parse(s);
     defer tree.deinit();
 
-    var result = try unmarshal(ExampleStruct, tree.root);
+    var result = try unmarshal(ExampleStruct, tree.root, std.debug.global_allocator);
     std.debug.warn("\n{}\n", result);
 ```
 
