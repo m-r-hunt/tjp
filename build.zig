@@ -6,9 +6,12 @@ pub fn build(b: *Builder) void {
     //lib.setBuildMode(mode);
     //lib.install();
 
-    var main_tests = b.addTest("src/main.zig");
-    main_tests.setBuildMode(mode);
+    var tjp_tests = b.addTest("src/tjp.zig");
+    var unmarshal_tests = b.addTest("src/unmarshal.zig");
+    tjp_tests.setBuildMode(mode);
+    unmarshal_tests.setBuildMode(mode);
 
     const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&main_tests.step);
+    test_step.dependOn(&tjp_tests.step);
+    test_step.dependOn(&unmarshal_tests.step);
 }
