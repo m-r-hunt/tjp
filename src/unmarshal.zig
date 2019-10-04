@@ -6,7 +6,7 @@ const StringHashMap = std.StringHashMap;
 const math = std.math;
 const TypeInfo = @import("builtin").TypeInfo;
 
-const TSJE = error{
+const UnmarshalJSONError = error{
     JSONMissingObjectField,
     JSONExpectedObject,
     JSONExpectedBool,
@@ -196,8 +196,8 @@ test "Test isStringHashMap" {
     testing.expect(isStringHashMap(OtherHashMap) == null);
 }
 
-fn unmarshalOptional(comptime T: type, value: json.Value) TSJE!?T {
-    // Things seem to get confused badly if you mix up TSJE!T and TSJE!?T so we need to be careful here.
+fn unmarshalOptional(comptime T: type, value: json.Value) UnmarshalJSONError!?T {
+    // Things seem to get confused badly if you mix up UnmarshalJSONError!T and UnmarshalJSONError!?T so we need to be careful here.
     if (unmarshal(T, value)) |val| {
         return val;
     } else |err| {
@@ -205,7 +205,7 @@ fn unmarshalOptional(comptime T: type, value: json.Value) TSJE!?T {
     }
 }
 
-fn unmarshalArray(comptime T: type, comptime array_type: TypeInfo.Array, value: json.Value) TSJE!T {
+fn unmarshalArray(comptime T: type, comptime array_type: TypeInfo.Array, value: json.Value) UnmarshalJSONError!T {
     switch (value) {
         .Array => |array| {
             if (array.count() == array_type.len) {
@@ -222,7 +222,7 @@ fn unmarshalArray(comptime T: type, comptime array_type: TypeInfo.Array, value: 
     }
 }
 
-fn unmarshalStruct(comptime T: type, comptime struct_type: TypeInfo.Struct, value: json.Value) TSJE!T {
+fn unmarshalStruct(comptime T: type, comptime struct_type: TypeInfo.Struct, value: json.Value) UnmarshalJSONError!T {
     if (isArrayList(T)) |item_type| {
         switch (value) {
             .Array => |a| {
@@ -278,7 +278,7 @@ fn unmarshalStruct(comptime T: type, comptime struct_type: TypeInfo.Struct, valu
     }
 }
 
-fn unmarshalEnum(comptime T: type, comptime enum_type: TypeInfo.Enum, value: json.Value) TSJE!T {
+fn unmarshalEnum(comptime T: type, comptime enum_type: TypeInfo.Enum, value: json.Value) UnmarshalJSONError!T {
     switch (value) {
         .Integer => |i| {
             var ret: T = undefined;
@@ -326,7 +326,7 @@ fn unmarshalEnum(comptime T: type, comptime enum_type: TypeInfo.Enum, value: jso
     }
 }
 
-fn unmarshalUnion(comptime T: type, comptime union_type: TypeInfo.Union, value: json.Value) TSJE!T {
+fn unmarshalUnion(comptime T: type, comptime union_type: TypeInfo.Union, value: json.Value) UnmarshalJSONError!T {
     if (union_type.tag_type) |tag_type| {
         const JSONTagType = @TagType(json.Value);
         if (JSONTagType(value) != JSONTagType.Object) {
@@ -354,7 +354,7 @@ fn unmarshalUnion(comptime T: type, comptime union_type: TypeInfo.Union, value: 
     }
 }
 
-fn unmarshalPointer(comptime T: type, comptime pointer_type: TypeInfo.Pointer, value: json.Value) TSJE!T {
+fn unmarshalPointer(comptime T: type, comptime pointer_type: TypeInfo.Pointer, value: json.Value) UnmarshalJSONError!T {
     if (!pointer_type.is_const or pointer_type.size != TypeInfo.Pointer.Size.Slice) {
         @compileError("Only strings are supported as pointers in TJP");
     }
@@ -366,7 +366,7 @@ fn unmarshalPointer(comptime T: type, comptime pointer_type: TypeInfo.Pointer, v
     }
 }
 
-fn unmarshal(comptime T: type, value: json.Value) TSJE!T {
+fn unmarshal(comptime T: type, value: json.Value) UnmarshalJSONError!T {
     const type_info = @typeInfo(T);
     return switch (type_info) {
         .Bool => switch (value) {
