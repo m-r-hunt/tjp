@@ -7,6 +7,10 @@ TJP is currently unfinished (see TODOs below), but starting to be functional.
 ## Example
 
 ```zig
+    const tjp = @import("tjp");
+    const std = @import("std");
+    const json = std.json;
+
     const ExampleStruct = struct {
         an_int: i32,
         a_float: f32,
@@ -31,7 +35,7 @@ TJP is currently unfinished (see TODOs below), but starting to be functional.
     var tree = try p.parse(s);
     defer tree.deinit();
 
-    var result = try unmarshal(ExampleStruct, tree.root, std.debug.global_allocator);
+    var result = try tjp.unmarshal(ExampleStruct, tree.root, std.debug.global_allocator);
     std.debug.warn("\n{}\n", result);
 ```
 
