@@ -47,7 +47,7 @@ Zig's package management is still a WIP at the time of writing. To use this as a
 lib_or_exe.addPackagePath("tjp", "path/to/tjp/src/tjp/zig");
 ```
 
-Then you can `@import(tjp)` in your source files.
+Then you can `@import("tjp")` in your source files.
 
 ## How it works
 
