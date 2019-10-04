@@ -1,6 +1,6 @@
 # Typed JSON Parser
 
-Typed JSON Parser (TJP for short) is a Zig library for parsing JSON directly into Zig values, unlike std.json which returns a tree of unions which the user must marshal into their desired type. In fact TJP is just a wrapper around std.json.
+Typed JSON Parser (TJP for short) is a Zig library for parsing JSON directly into Zig values, unlike std.json which returns a tree of unions which the user must marshal into their desired type. In fact TJP just provides the final unmarshalling step using a std.json Value tree.
 
 TJP is currently unfinished (see TODOs below), but starting to be functional.
 
@@ -41,7 +41,11 @@ ExampleStruct{ .an_int = 1, .a_float = 3.5e+00, .optional = null, .an_array = i3
 
 ## Usage
 
-(TODO Figure out how Zig packages work with the build system and how someone would actually use this)
+Zig's package management is still a WIP at the time of writing. To use this as a package, include the source somewhere (possibly as a git submodule) and add this to your build.zig:
+
+```zig
+lib_or_exe.addPackagePath("tjp", "path/to/tjp/src/tjp/zig");
+```
 
 ## How it works
 
@@ -57,10 +61,15 @@ TJP uses comptime reflection to inspect the types passed to it, and generate the
 | Struct | JSON Object with keys corresponding to struct fields and correctly typed values |
 | Array | JSON Array of correct typed values, with the exact length of the array type. (TODO Array of optionals?) |
 | Enum | JSON String of enum case name or integer enum value |
-| []const u8 | JSON String (TODO Memory) |
+| []const u8 | JSON String (Memory is shared with the original std.json Value) |
 | Tagged Union | JSON Object with two fields: "tag", a string with the tag name, or the integer enum value, and "value", the value for that tag |
 
-Types not listed are not supported.
+Types not listed are not supported. Additional, these standard library containers are also understood as a special case:
+
+| Zig Type | JSON Type |
+|----------|-----------|
+| ArrayList(T) | As a normal Array, but any size |
+| StringHashMap(T) | JSON object with correctly typed values |
 
 ## Limitations
 
@@ -73,5 +82,5 @@ Types not listed are not supported.
 ## Future Enhancements
 
 * Better error reporting (preferably including the paths through the Zig type and JSON to where the error occurred).
-* Support for ArrayList(T) and StringHashMap(T) as variable length JSON arrays and objects with arbitrary keys respectively. Since these are stdlib types we should be able to detect them and construct them as a special case. This adds a lot of flexibility lacking from the primitive type mappings given above.
-* A JSON writer that writes Zig types out in the format expected by the TJP parser
+* A JSON writer that writes Zig types out in the format expected by the TJP parser.
+* An all-in-one wrapper around std.json that handles the initial JSON parsing too.
