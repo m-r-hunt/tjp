@@ -94,7 +94,7 @@ fn tsjson_struct(comptime T: type, comptime struct_type: TypeInfo.Struct, value:
                     @field(ret, field.name) = try tsjson(field.field_type, val);
                 } else {
                     if (comptime is_optional(field.field_type)) {
-                        //@field(ret, field.name) = null;
+                        @field(ret, field.name) = null;
                     } else {
                         // Ideally we'd just return directly here, but doing so hits a compiler bug.
                         // Returning after the inline for loop instead works though.
@@ -253,6 +253,7 @@ const TestStruct = struct {
     bar: i64 = 0,
     baz: i64 = 12,
     opt: ?i32,
+    opt2: ?i32,
     flt: f32,
     iflt: f32,
     arr: [3]f32,
