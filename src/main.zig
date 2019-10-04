@@ -23,6 +23,8 @@ const TSJE = error{
     JSONUntaggedUnionNotSupported,
     JSONNoUnionTagName,
     JSONNoUnionValue,
+    JSONArrayListError,
+    JSONStringHashMapError,
 };
 
 fn i64InIntegerRange(comptime int_type: TypeInfo.Int, value: i64) bool {
@@ -66,11 +68,11 @@ test "Test is_optional" {
 // However, we need to find the item type. We do this by inspecting the items member of the ArrayList (if it is present) which is a slice of the item type.
 // If it's not an ArrayList this will either not be present or not be a slice, so we need some careful programming.
 // If ArrayList internals change this function will need updating, but the test will catch that.
-fn is_arraylist(comptime T: type) bool {
+fn is_arraylist(comptime T: type) ?type {
     const type_info = @typeInfo(T);
     const TypeInfoTag = @TagType(TypeInfo);
     if (TypeInfoTag(type_info) != TypeInfoTag.Struct) {
-        return false;
+        return null;
     }
     comptime var has_items = false;
     comptime var item_type: type = undefined;
@@ -84,30 +86,31 @@ fn is_arraylist(comptime T: type) bool {
         }
     }
     if (!has_items) {
-        return false;
+        return null;
     }
-    return (T == ArrayList(item_type));
+    if (T == ArrayList(item_type)) {
+        return item_type;
+    } else {
+        return null;
+    }
 }
 
 // As for ArrayList above, we need to inspect entries.kv.key/value for string/item type
-fn is_stringhashmap(comptime T: type) bool {
+fn is_stringhashmap(comptime T: type) ?type {
     const type_info = @typeInfo(T);
     const TypeInfoTag = @TagType(TypeInfo);
     if (TypeInfoTag(type_info) != TypeInfoTag.Struct) {
-        return false;
+        return null;
     }
     comptime var has_entries = false;
     comptime var item_type: type = undefined;
     inline for (type_info.Struct.fields) |field| {
         if (std.mem.eql(u8, field.name, "entries")) {
-            std.debug.warn("found entries\n");
             const fti = @typeInfo(field.field_type);
             if (TypeInfoTag(fti) == TypeInfoTag.Pointer and fti.Pointer.size == TypeInfo.Pointer.Size.Slice) {
-                std.debug.warn("found entries slice\n");
                 const entry_type = fti.Pointer.child;
                 const eti = @typeInfo(entry_type);
                 if (TypeInfoTag(eti) == TypeInfoTag.Struct) {
-                    std.debug.warn("found entriy struct\n");
                     comptime var kv_type: type = undefined;
                     comptime var has_kv = false;
                     inline for (eti.Struct.fields) |efield| {
@@ -117,8 +120,7 @@ fn is_stringhashmap(comptime T: type) bool {
                         }
                     }
                     if (!has_kv) {
-                        std.debug.warn("no kv\n");
-                        return false;
+                        return null;
                     }
                     const kvti = @typeInfo(kv_type);
                     if (TypeInfoTag(kvti) == TypeInfoTag.Struct) {
@@ -128,7 +130,8 @@ fn is_stringhashmap(comptime T: type) bool {
                         inline for (kvti.Struct.fields) |kvfield| {
                             if (std.mem.eql(u8, kvfield.name, "key") and kvfield.field_type == []const u8) {
                                 has_k = true;
-                            } else if (std.mem.eql(u8, field.name, "value")) {
+                            }
+                            if (std.mem.eql(u8, kvfield.name, "value")) {
                                 has_v = true;
                                 v_type = kvfield.field_type;
                             }
@@ -142,48 +145,54 @@ fn is_stringhashmap(comptime T: type) bool {
             }
         }
     }
-    std.debug.warn("{}", has_entries);
     if (!has_entries) {
-        return false;
+        return null;
     }
-    return (T == StringHashMap(item_type));
+    if (T == StringHashMap(item_type)) {
+        return item_type;
+    } else {
+        return null;
+    }
 }
 
 test "Test is_arraylist" {
-    testing.expect(is_arraylist(ArrayList(i32)));
+    testing.expect(is_arraylist(ArrayList(i32)).? == i32);
 
-    testing.expect(!is_arraylist(i32));
-    testing.expect(!is_arraylist([]i32));
-    testing.expect(!is_arraylist(struct {
+    testing.expect(is_arraylist(i32) == null);
+    testing.expect(is_arraylist([]i32) == null);
+    testing.expect(is_arraylist(struct {
         items: []i32,
-    }));
+    }) == null);
 
     const SomeNamedType = ArrayList(i32);
-    testing.expect(is_arraylist(SomeNamedType));
+    testing.expect(is_arraylist(SomeNamedType).? == i32);
     const SomeOtherNamedType = i32;
-    testing.expect(!is_arraylist(SomeOtherNamedType));
+    testing.expect(is_arraylist(SomeOtherNamedType) == null);
 }
 
 test "Test is_stringhashmap" {
-    testing.expect(is_stringhashmap(StringHashMap(i32)));
+    testing.expect(is_stringhashmap(StringHashMap(i32)).? == i32);
 
-    testing.expect(!is_stringhashmap(i32));
-    testing.expect(!is_stringhashmap(ArrayList(i32)));
-    testing.expect(!is_stringhashmap(struct {
+    testing.expect(is_stringhashmap(i32) == null);
+    testing.expect(is_stringhashmap(ArrayList(i32)) == null);
+    testing.expect(is_stringhashmap(struct {
         entries: struct {
             kv: struct {
                 key: i32,
                 value: i32,
             },
         },
-    }));
+    }) == null);
+    testing.expect(is_stringhashmap(struct {
+        entries: struct {},
+    }) == null);
 
     const SomeNamedType = StringHashMap(i32);
-    testing.expect(is_stringhashmap(SomeNamedType));
+    testing.expect(is_stringhashmap(SomeNamedType).? == i32);
     const SomeOtherNamedType = i32;
-    testing.expect(!is_stringhashmap(SomeOtherNamedType));
+    testing.expect(is_stringhashmap(SomeOtherNamedType) == null);
     const OtherHashMap = std.AutoHashMap(i32, i32);
-    testing.expect(!is_stringhashmap(OtherHashMap));
+    testing.expect(is_stringhashmap(OtherHashMap) == null);
 }
 
 fn tsjson_optional(comptime T: type, value: json.Value) TSJE!?T {
@@ -213,35 +222,58 @@ fn tsjson_array(comptime T: type, comptime array_type: TypeInfo.Array, value: js
 }
 
 fn tsjson_struct(comptime T: type, comptime struct_type: TypeInfo.Struct, value: json.Value) TSJE!T {
-    std.debug.warn("Got here\n");
-    switch (value) {
-        .Object => |o| {
-            // Hopefully this is safe as we either assign to all the fields of ret *or* return an error instead.
-            // The "undefined" docs are not 100% clear though so this could be undefined behaviour? We're still using a partially initialised value (but only assigning until all fields are assigned).
-            var ret: T = undefined;
-            var any_missing = false;
-            inline for (struct_type.fields) |field| {
-                if (o.getValue(field.name)) |val| {
-                    @field(ret, field.name) = try tsjson(field.field_type, val);
-                } else {
-                    if (comptime is_optional(field.field_type)) {
-                        @field(ret, field.name) = null;
+    if (is_arraylist(T)) |item_type| {
+        switch (value) {
+            .Array => |a| {
+                var ret = ArrayList(item_type).init(std.debug.global_allocator);
+                for (a.toSlice()) |array_val| {
+                    try ret.append(try tsjson(item_type, array_val)) catch error.JSONArrayListError;
+                }
+                return ret;
+            },
+            else => return error.JSONExpectedArray,
+        }
+    } else if (is_stringhashmap(T)) |item_type| {
+        switch (value) {
+            .Object => |o| {
+                var ret = StringHashMap(item_type).init(std.debug.global_allocator);
+                var it = o.iterator();
+                while (it.next()) |kv| {
+                    _ = try ret.put(kv.key, try tsjson(item_type, kv.value)) catch error.JSONStringHashMapError;
+                }
+                return ret;
+            },
+            else => return error.JSONExpectedObject,
+        }
+    } else {
+        // General case struct by field
+        switch (value) {
+            .Object => |o| {
+                // Hopefully this is safe as we either assign to all the fields of ret *or* return an error instead.
+                // The "undefined" docs are not 100% clear though so this could be undefined behaviour? We're still using a partially initialised value (but only assigning until all fields are assigned).
+                var ret: T = undefined;
+                var any_missing = false;
+                inline for (struct_type.fields) |field| {
+                    if (o.getValue(field.name)) |val| {
+                        @field(ret, field.name) = try tsjson(field.field_type, val);
                     } else {
-                        // Ideally we'd just return directly here, but doing so hits a compiler bug.
-                        // Returning after the inline for loop instead works though.
-                        //return error.JSONMissingObjectField;
-                        any_missing = true;
-                        std.debug.warn("{}", field.name);
+                        if (comptime is_optional(field.field_type)) {
+                            @field(ret, field.name) = null;
+                        } else {
+                            // Ideally we'd just return directly here, but doing so hits a compiler bug.
+                            // Returning after the inline for loop instead works though.
+                            //return error.JSONMissingObjectField;
+                            any_missing = true;
+                        }
                     }
                 }
-                std.debug.warn("{}\n", o.getValue(field.name));
-            }
-            if (any_missing) {
-                return error.JSONMissingObjectField;
-            }
-            return ret;
-        },
-        else => return error.JSONExpectedObject,
+                if (any_missing) {
+                    return error.JSONMissingObjectField;
+                }
+                return ret;
+            },
+            else => return error.JSONExpectedObject,
+        }
     }
 }
 
@@ -304,7 +336,6 @@ fn tsjson_union(comptime T: type, comptime union_type: TypeInfo.Union, value: js
             return error.JSONNoUnionTagName;
         }
         var tag = try tsjson_enum(tag_type, @typeInfo(tag_type).Enum, tag_name.?);
-        std.debug.warn("{}", tag);
         var union_value = value.Object.getValue("value");
         if (union_value == null) {
             return error.JSONNoUnionValue;
@@ -323,7 +354,6 @@ fn tsjson_union(comptime T: type, comptime union_type: TypeInfo.Union, value: js
 }
 
 fn tsjson(comptime T: type, value: json.Value) TSJE!T {
-    std.debug.warn("Actually running tsjson {}\n", value);
     const type_info = @typeInfo(T);
     return switch (type_info) {
         .Bool => switch (value) {
@@ -390,10 +420,11 @@ const TestStruct = struct {
     arr: [3]f32,
     test_enum: TestEnum,
     nested: Nested,
+    array_list: ArrayList(i32),
+    string_hash_map: StringHashMap(i32),
 };
 
 pub fn main() !void {
-    std.debug.warn("Actually running test\n");
     var p = json.Parser.init(std.debug.global_allocator, false);
     defer p.deinit();
 
@@ -408,11 +439,10 @@ pub fn main() !void {
 }
 
 test "test all features that work" {
-    std.debug.warn("Actually running test\n");
     var p = json.Parser.init(std.debug.global_allocator, false);
     defer p.deinit();
 
-    const s = "{\"test_enum\": \"C\", \"foo\": true, \"bar\": 1, \"baz\": 2, \"opt\": 3, \"flt\": 2.3, \"iflt\": 1, \"arr\": [1, 2, 3], \"nested\": {\"foo\": true, \"bar\": 1, \"baz\": 2, \"opt\": 3, \"flt\": 2.3, \"iflt\": 1, \"arr\": [1, 2, 3]}}";
+    const s = "{\"string_hash_map\": {\"foo\": 3, \"bar\": 42}, \"array_list\": [1, 2, 3, 4, 5], \"test_enum\": \"C\", \"foo\": true, \"bar\": 1, \"baz\": 2, \"opt\": 3, \"flt\": 2.3, \"iflt\": 1, \"arr\": [1, 2, 3], \"nested\": {\"foo\": true, \"bar\": 1, \"baz\": 2, \"opt\": 3, \"flt\": 2.3, \"iflt\": 1, \"arr\": [1, 2, 3]}}";
 
     var tree = try p.parse(s);
     defer tree.deinit();
