@@ -47,6 +47,8 @@ Zig's package management is still a WIP at the time of writing. To use this as a
 lib_or_exe.addPackagePath("tjp", "path/to/tjp/src/tjp/zig");
 ```
 
+Then you can `@import(tjp)` in your source files.
+
 ## How it works
 
 TJP uses comptime reflection to inspect the types passed to it, and generate the code needed to traverse the std.json ValueTree at runtime. It uses a recursive function to inspect potentially nested types.
