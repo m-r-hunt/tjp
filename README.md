@@ -56,9 +56,9 @@ TJP uses comptime reflection to inspect the types passed to it, and generate the
 | Optional | underlying type or null. Key may be omitted from JSON encoded structs (in which case the optional will be null) |
 | Struct | JSON Object with keys corresponding to struct fields and correctly typed values |
 | Array | JSON Array of correct typed values, with the exact length of the array type. (TODO Array of optionals?) |
-| Enum | JSON String of enum case name (TODO) |
+| Enum | JSON String of enum case name or integer enum value |
 | []const u8 | JSON String (TODO Memory) |
-| Tagged Union | JSON Object with two fields: "@tagName", a string with the tag name, and "value", the value for that tag (TODO) |
+| Tagged Union | JSON Object with two fields: "tag", a string with the tag name, or the integer enum value, and "value", the value for that tag |
 
 Types not listed are not supported.
 

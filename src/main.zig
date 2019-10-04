@@ -16,11 +16,36 @@ const TSJE = error{
     JSONExpectedNull,
     JSONArrayWrongLength,
     JSONExpectedArray,
+    JSONNoEnumForInteger,
+    JSONExpectedIntOrEnumName,
+    JSONBadEnumName,
+    JSONUntaggedUnionNotSupported,
+    JSONNoUnionTagName,
+    JSONNoUnionValue,
 };
 
 fn i64InIntegerRange(comptime int_type: TypeInfo.Int, value: i64) bool {
-    // TODO Actually check signedness and range for smaller types
-    return true;
+    const actual_type = @Type(TypeInfo{ .Int = int_type });
+    if (value < 0 and !int_type.is_signed) {
+        return false;
+    }
+    if (int_type.bits >= 64) {
+        return true;
+    }
+    if (value <= math.maxInt(actual_type)) {
+        return true;
+    }
+    return false;
+}
+
+test "Test i64InIntegerRange" {
+    testing.expect(!i64InIntegerRange(TypeInfo.Int{ .is_signed = false, .bits = 64 }, -1));
+    testing.expect(i64InIntegerRange(TypeInfo.Int{ .is_signed = false, .bits = 63 }, math.maxInt(u63)));
+
+    testing.expect(i64InIntegerRange(TypeInfo.Int{ .is_signed = true, .bits = 64 }, -1));
+    testing.expect(i64InIntegerRange(TypeInfo.Int{ .is_signed = true, .bits = 128 }, -1));
+    testing.expect(i64InIntegerRange(TypeInfo.Int{ .is_signed = true, .bits = 16 }, 1 << 15 - 1));
+    testing.expect(!i64InIntegerRange(TypeInfo.Int{ .is_signed = true, .bits = 16 }, 1 << 15));
 }
 
 fn is_optional(comptime T: type) bool {
@@ -89,10 +114,81 @@ fn tsjson_struct(comptime T: type, comptime struct_type: TypeInfo.Struct, value:
     }
 }
 
-// There seems to be some bug with returning an error from some switch branches.
-// This forces it to be interpreted as an error union not just an error.
-fn badType(comptime T: type) TSJE!T {
-    return error.JSONBadType;
+fn tsjson_enum(comptime T: type, comptime enum_type: TypeInfo.Enum, value: json.Value) TSJE!T {
+    switch (value) {
+        .Integer => |i| {
+            var ret: T = undefined;
+            var found = false;
+            inline for (enum_type.fields) |field| {
+                if (field.value == i) {
+                    ret = @intToEnum(T, field.value);
+                    found = true;
+                }
+            }
+            if (!found) {
+                return error.JSONNoEnumForInteger;
+            }
+            return ret;
+        },
+        .Float => |f| {
+            var ret: T = undefined;
+            var found = false;
+            inline for (enum_type.fields) |field| {
+                if (math.floor(f) == f and field.value == @floatToInt(enum_type.tag_type, f)) {
+                    ret = @intToEnum(T, field.value);
+                    found = true;
+                }
+            }
+            if (!found) {
+                return error.JSONNoEnumForInteger;
+            }
+            return ret;
+        },
+        .String => |s| {
+            var ret: T = undefined;
+            var found = false;
+            inline for (enum_type.fields) |field| {
+                if (std.mem.eql(u8, field.name, s)) {
+                    ret = @intToEnum(T, field.value);
+                    found = true;
+                }
+            }
+            if (!found) {
+                return error.JSONBadEnumName;
+            }
+            return ret;
+        },
+        else => return error.JSONExpectedIntOrEnumName,
+    }
+}
+
+fn tsjson_union(comptime T: type, comptime union_type: TypeInfo.Union, value: json.Value) TSJE!T {
+    if (union_type.tag_type) |tag_type| {
+        const JSONTagType = @TagType(json.Value);
+        if (JSONTagType(value) != JSONTagType.Object) {
+            return error.JSONExpectedObject;
+        }
+        var tag_name = value.Object.getValue("tag");
+        if (tag_name == null) {
+            return error.JSONNoUnionTagName;
+        }
+        var tag = try tsjson_enum(tag_type, @typeInfo(tag_type).Enum, tag_name.?);
+        std.debug.warn("{}", tag);
+        var union_value = value.Object.getValue("value");
+        if (union_value == null) {
+            return error.JSONNoUnionValue;
+        }
+        inline for (union_type.fields) |field| {
+            if (field.enum_field.?.value == @enumToInt(tag)) {
+                var result = try tsjson(field.field_type, union_value.?);
+                return @unionInit(T, field.name, result);
+            }
+        }
+        // We found a valid union tag so one of the fields should have matched and returned from the loop.
+        unreachable;
+    } else {
+        return error.JSONUntaggedUnionNotSupported;
+    }
 }
 
 fn tsjson(comptime T: type, value: json.Value) TSJE!T {
@@ -130,7 +226,9 @@ fn tsjson(comptime T: type, value: json.Value) TSJE!T {
         .Array => |array_type| tsjson_array(T, array_type, value),
         .Struct => |struct_type| tsjson_struct(T, struct_type, value),
         .Optional => |optional_type| tsjson_optional(optional_type.child, value),
-        else => badType(T),
+        .Enum => |enum_type| tsjson_enum(T, enum_type, value),
+        .Union => |union_type| tsjson_union(T, union_type, value),
+        else => @compileError("Bad Type"),
     };
 }
 
@@ -144,6 +242,12 @@ const Nested = struct {
     arr: [3]i32,
 };
 
+const TestEnum = enum {
+    A = 1,
+    B,
+    C,
+};
+
 const TestStruct = struct {
     foo: bool = false,
     bar: i64 = 0,
@@ -152,6 +256,7 @@ const TestStruct = struct {
     flt: f32,
     iflt: f32,
     arr: [3]f32,
+    test_enum: TestEnum,
     nested: Nested,
 };
 
@@ -175,7 +280,7 @@ test "test all features that work" {
     var p = json.Parser.init(std.debug.global_allocator, false);
     defer p.deinit();
 
-    const s = "{\"foo\": true, \"bar\": 1, \"baz\": 2, \"opt\": 3, \"flt\": 2.3, \"iflt\": 1, \"arr\": [1, 2, 3], \"nested\": {\"foo\": true, \"bar\": 1, \"baz\": 2, \"opt\": 3, \"flt\": 2.3, \"iflt\": 1, \"arr\": [1, 2, 3]}}";
+    const s = "{\"test_enum\": \"C\", \"foo\": true, \"bar\": 1, \"baz\": 2, \"opt\": 3, \"flt\": 2.3, \"iflt\": 1, \"arr\": [1, 2, 3], \"nested\": {\"foo\": true, \"bar\": 1, \"baz\": 2, \"opt\": 3, \"flt\": 2.3, \"iflt\": 1, \"arr\": [1, 2, 3]}}";
 
     var tree = try p.parse(s);
     defer tree.deinit();
@@ -210,5 +315,26 @@ test "test README example" {
     defer tree.deinit();
 
     var result = try tsjson(ExampleStruct, tree.root);
+    std.debug.warn("\n{}\n", result);
+}
+
+test "Test Union" {
+    const ExampleUnion = union(enum) {
+        A: i32,
+        B: f32,
+    };
+    var p = json.Parser.init(std.debug.global_allocator, false);
+    defer p.deinit();
+
+    const s =
+        \\{
+        \\ "tag": "A",
+        \\ "value": 42
+        \\}
+    ;
+    var tree = try p.parse(s);
+    defer tree.deinit();
+
+    var result = try tsjson(ExampleUnion, tree.root);
     std.debug.warn("\n{}\n", result);
 }
