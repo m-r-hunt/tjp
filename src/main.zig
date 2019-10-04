@@ -25,6 +25,7 @@ const TSJE = error{
     JSONNoUnionValue,
     JSONArrayListError,
     JSONStringHashMapError,
+    JSONExpectedString,
 };
 
 fn i64InIntegerRange(comptime int_type: TypeInfo.Int, value: i64) bool {
@@ -51,16 +52,16 @@ test "Test i64InIntegerRange" {
     testing.expect(!i64InIntegerRange(TypeInfo.Int{ .is_signed = true, .bits = 16 }, 1 << 15));
 }
 
-fn is_optional(comptime T: type) bool {
+fn isOptional(comptime T: type) bool {
     switch (@typeInfo(T)) {
         .Optional => return true,
         else => return false,
     }
 }
 
-test "Test is_optional" {
-    testing.expect(is_optional(?i32));
-    testing.expect(!is_optional(i32));
+test "Test isOptional" {
+    testing.expect(isOptional(?i32));
+    testing.expect(!isOptional(i32));
 }
 
 // To find out if something is an ArrayList(S), we can just compare T == ArrayList(S)
@@ -68,7 +69,7 @@ test "Test is_optional" {
 // However, we need to find the item type. We do this by inspecting the items member of the ArrayList (if it is present) which is a slice of the item type.
 // If it's not an ArrayList this will either not be present or not be a slice, so we need some careful programming.
 // If ArrayList internals change this function will need updating, but the test will catch that.
-fn is_arraylist(comptime T: type) ?type {
+fn isArrayList(comptime T: type) ?type {
     const type_info = @typeInfo(T);
     const TypeInfoTag = @TagType(TypeInfo);
     if (TypeInfoTag(type_info) != TypeInfoTag.Struct) {
@@ -96,7 +97,7 @@ fn is_arraylist(comptime T: type) ?type {
 }
 
 // As for ArrayList above, we need to inspect entries.kv.key/value for string/item type
-fn is_stringhashmap(comptime T: type) ?type {
+fn isStringHashMap(comptime T: type) ?type {
     const type_info = @typeInfo(T);
     const TypeInfoTag = @TagType(TypeInfo);
     if (TypeInfoTag(type_info) != TypeInfoTag.Struct) {
@@ -155,27 +156,27 @@ fn is_stringhashmap(comptime T: type) ?type {
     }
 }
 
-test "Test is_arraylist" {
-    testing.expect(is_arraylist(ArrayList(i32)).? == i32);
+test "Test isArrayList" {
+    testing.expect(isArrayList(ArrayList(i32)).? == i32);
 
-    testing.expect(is_arraylist(i32) == null);
-    testing.expect(is_arraylist([]i32) == null);
-    testing.expect(is_arraylist(struct {
+    testing.expect(isArrayList(i32) == null);
+    testing.expect(isArrayList([]i32) == null);
+    testing.expect(isArrayList(struct {
         items: []i32,
     }) == null);
 
     const SomeNamedType = ArrayList(i32);
-    testing.expect(is_arraylist(SomeNamedType).? == i32);
+    testing.expect(isArrayList(SomeNamedType).? == i32);
     const SomeOtherNamedType = i32;
-    testing.expect(is_arraylist(SomeOtherNamedType) == null);
+    testing.expect(isArrayList(SomeOtherNamedType) == null);
 }
 
-test "Test is_stringhashmap" {
-    testing.expect(is_stringhashmap(StringHashMap(i32)).? == i32);
+test "Test isStringHashMap" {
+    testing.expect(isStringHashMap(StringHashMap(i32)).? == i32);
 
-    testing.expect(is_stringhashmap(i32) == null);
-    testing.expect(is_stringhashmap(ArrayList(i32)) == null);
-    testing.expect(is_stringhashmap(struct {
+    testing.expect(isStringHashMap(i32) == null);
+    testing.expect(isStringHashMap(ArrayList(i32)) == null);
+    testing.expect(isStringHashMap(struct {
         entries: struct {
             kv: struct {
                 key: i32,
@@ -183,34 +184,34 @@ test "Test is_stringhashmap" {
             },
         },
     }) == null);
-    testing.expect(is_stringhashmap(struct {
+    testing.expect(isStringHashMap(struct {
         entries: struct {},
     }) == null);
 
     const SomeNamedType = StringHashMap(i32);
-    testing.expect(is_stringhashmap(SomeNamedType).? == i32);
+    testing.expect(isStringHashMap(SomeNamedType).? == i32);
     const SomeOtherNamedType = i32;
-    testing.expect(is_stringhashmap(SomeOtherNamedType) == null);
+    testing.expect(isStringHashMap(SomeOtherNamedType) == null);
     const OtherHashMap = std.AutoHashMap(i32, i32);
-    testing.expect(is_stringhashmap(OtherHashMap) == null);
+    testing.expect(isStringHashMap(OtherHashMap) == null);
 }
 
-fn tsjson_optional(comptime T: type, value: json.Value) TSJE!?T {
+fn unmarshalOptional(comptime T: type, value: json.Value) TSJE!?T {
     // Things seem to get confused badly if you mix up TSJE!T and TSJE!?T so we need to be careful here.
-    if (tsjson(T, value)) |val| {
+    if (unmarshal(T, value)) |val| {
         return val;
     } else |err| {
         return err;
     }
 }
 
-fn tsjson_array(comptime T: type, comptime array_type: TypeInfo.Array, value: json.Value) TSJE!T {
+fn unmarshalArray(comptime T: type, comptime array_type: TypeInfo.Array, value: json.Value) TSJE!T {
     switch (value) {
         .Array => |array| {
             if (array.count() == array_type.len) {
                 var ret: T = undefined;
                 for (array.toSlice()) |val, i| {
-                    ret[i] = try tsjson(array_type.child, val);
+                    ret[i] = try unmarshal(array_type.child, val);
                 }
                 return ret;
             } else {
@@ -221,25 +222,25 @@ fn tsjson_array(comptime T: type, comptime array_type: TypeInfo.Array, value: js
     }
 }
 
-fn tsjson_struct(comptime T: type, comptime struct_type: TypeInfo.Struct, value: json.Value) TSJE!T {
-    if (is_arraylist(T)) |item_type| {
+fn unmarshalStruct(comptime T: type, comptime struct_type: TypeInfo.Struct, value: json.Value) TSJE!T {
+    if (isArrayList(T)) |item_type| {
         switch (value) {
             .Array => |a| {
                 var ret = ArrayList(item_type).init(std.debug.global_allocator);
                 for (a.toSlice()) |array_val| {
-                    try ret.append(try tsjson(item_type, array_val)) catch error.JSONArrayListError;
+                    try ret.append(try unmarshal(item_type, array_val)) catch error.JSONArrayListError;
                 }
                 return ret;
             },
             else => return error.JSONExpectedArray,
         }
-    } else if (is_stringhashmap(T)) |item_type| {
+    } else if (isStringHashMap(T)) |item_type| {
         switch (value) {
             .Object => |o| {
                 var ret = StringHashMap(item_type).init(std.debug.global_allocator);
                 var it = o.iterator();
                 while (it.next()) |kv| {
-                    _ = try ret.put(kv.key, try tsjson(item_type, kv.value)) catch error.JSONStringHashMapError;
+                    _ = try ret.put(kv.key, try unmarshal(item_type, kv.value)) catch error.JSONStringHashMapError;
                 }
                 return ret;
             },
@@ -255,9 +256,9 @@ fn tsjson_struct(comptime T: type, comptime struct_type: TypeInfo.Struct, value:
                 var any_missing = false;
                 inline for (struct_type.fields) |field| {
                     if (o.getValue(field.name)) |val| {
-                        @field(ret, field.name) = try tsjson(field.field_type, val);
+                        @field(ret, field.name) = try unmarshal(field.field_type, val);
                     } else {
-                        if (comptime is_optional(field.field_type)) {
+                        if (comptime isOptional(field.field_type)) {
                             @field(ret, field.name) = null;
                         } else {
                             // Ideally we'd just return directly here, but doing so hits a compiler bug.
@@ -277,7 +278,7 @@ fn tsjson_struct(comptime T: type, comptime struct_type: TypeInfo.Struct, value:
     }
 }
 
-fn tsjson_enum(comptime T: type, comptime enum_type: TypeInfo.Enum, value: json.Value) TSJE!T {
+fn unmarshalEnum(comptime T: type, comptime enum_type: TypeInfo.Enum, value: json.Value) TSJE!T {
     switch (value) {
         .Integer => |i| {
             var ret: T = undefined;
@@ -325,7 +326,7 @@ fn tsjson_enum(comptime T: type, comptime enum_type: TypeInfo.Enum, value: json.
     }
 }
 
-fn tsjson_union(comptime T: type, comptime union_type: TypeInfo.Union, value: json.Value) TSJE!T {
+fn unmarshalUnion(comptime T: type, comptime union_type: TypeInfo.Union, value: json.Value) TSJE!T {
     if (union_type.tag_type) |tag_type| {
         const JSONTagType = @TagType(json.Value);
         if (JSONTagType(value) != JSONTagType.Object) {
@@ -335,14 +336,14 @@ fn tsjson_union(comptime T: type, comptime union_type: TypeInfo.Union, value: js
         if (tag_name == null) {
             return error.JSONNoUnionTagName;
         }
-        var tag = try tsjson_enum(tag_type, @typeInfo(tag_type).Enum, tag_name.?);
+        var tag = try unmarshalEnum(tag_type, @typeInfo(tag_type).Enum, tag_name.?);
         var union_value = value.Object.getValue("value");
         if (union_value == null) {
             return error.JSONNoUnionValue;
         }
         inline for (union_type.fields) |field| {
             if (field.enum_field.?.value == @enumToInt(tag)) {
-                var result = try tsjson(field.field_type, union_value.?);
+                var result = try unmarshal(field.field_type, union_value.?);
                 return @unionInit(T, field.name, result);
             }
         }
@@ -353,7 +354,19 @@ fn tsjson_union(comptime T: type, comptime union_type: TypeInfo.Union, value: js
     }
 }
 
-fn tsjson(comptime T: type, value: json.Value) TSJE!T {
+fn unmarshalPointer(comptime T: type, comptime pointer_type: TypeInfo.Pointer, value: json.Value) TSJE!T {
+    if (!pointer_type.is_const or pointer_type.size != TypeInfo.Pointer.Size.Slice) {
+        @compileError("Only strings are supported as pointers in TJP");
+    }
+    switch (value) {
+        .String => |s| {
+            return s;
+        },
+        else => return error.JSONExpectedString,
+    }
+}
+
+fn unmarshal(comptime T: type, value: json.Value) TSJE!T {
     const type_info = @typeInfo(T);
     return switch (type_info) {
         .Bool => switch (value) {
@@ -384,11 +397,12 @@ fn tsjson(comptime T: type, value: json.Value) TSJE!T {
             .Float => |f| @floatCast(T, f),
             else => error.JSONExpectedNumber,
         },
-        .Array => |array_type| tsjson_array(T, array_type, value),
-        .Struct => |struct_type| tsjson_struct(T, struct_type, value),
-        .Optional => |optional_type| tsjson_optional(optional_type.child, value),
-        .Enum => |enum_type| tsjson_enum(T, enum_type, value),
-        .Union => |union_type| tsjson_union(T, union_type, value),
+        .Pointer => |pointer_type| unmarshalPointer(T, pointer_type, value),
+        .Array => |array_type| unmarshalArray(T, array_type, value),
+        .Struct => |struct_type| unmarshalStruct(T, struct_type, value),
+        .Optional => |optional_type| unmarshalOptional(optional_type.child, value),
+        .Enum => |enum_type| unmarshalEnum(T, enum_type, value),
+        .Union => |union_type| unmarshalUnion(T, union_type, value),
         else => @compileError("Bad Type"),
     };
 }
@@ -422,33 +436,20 @@ const TestStruct = struct {
     nested: Nested,
     array_list: ArrayList(i32),
     string_hash_map: StringHashMap(i32),
+    string: []const u8,
 };
-
-pub fn main() !void {
-    var p = json.Parser.init(std.debug.global_allocator, false);
-    defer p.deinit();
-
-    const s = "{\"foo\": true, \"barz\": 1}";
-
-    var tree = try p.parse(s);
-    defer tree.deinit();
-
-    //var result = try tsjson(TestStruct, tree);
-    var result = try tsjson(TestStruct, tree.root);
-    std.debug.warn("\n{}\n", result);
-}
 
 test "test all features that work" {
     var p = json.Parser.init(std.debug.global_allocator, false);
     defer p.deinit();
 
-    const s = "{\"string_hash_map\": {\"foo\": 3, \"bar\": 42}, \"array_list\": [1, 2, 3, 4, 5], \"test_enum\": \"C\", \"foo\": true, \"bar\": 1, \"baz\": 2, \"opt\": 3, \"flt\": 2.3, \"iflt\": 1, \"arr\": [1, 2, 3], \"nested\": {\"foo\": true, \"bar\": 1, \"baz\": 2, \"opt\": 3, \"flt\": 2.3, \"iflt\": 1, \"arr\": [1, 2, 3]}}";
+    const s = "{\"string\": \"hello json\", \"string_hash_map\": {\"foo\": 3, \"bar\": 42}, \"array_list\": [1, 2, 3, 4, 5], \"test_enum\": \"C\", \"foo\": true, \"bar\": 1, \"baz\": 2, \"opt\": 3, \"flt\": 2.3, \"iflt\": 1, \"arr\": [1, 2, 3], \"nested\": {\"foo\": true, \"bar\": 1, \"baz\": 2, \"opt\": 3, \"flt\": 2.3, \"iflt\": 1, \"arr\": [1, 2, 3]}}";
 
     var tree = try p.parse(s);
     defer tree.deinit();
 
-    var result = try tsjson(TestStruct, tree.root);
-    std.debug.warn("\n{}\n", result);
+    var result = try unmarshal(TestStruct, tree.root);
+    // TODO Rewrite this test. Probably as multiple tests.
 }
 
 test "test README example" {
@@ -476,8 +477,11 @@ test "test README example" {
     var tree = try p.parse(s);
     defer tree.deinit();
 
-    var result = try tsjson(ExampleStruct, tree.root);
-    std.debug.warn("\n{}\n", result);
+    var result = try unmarshal(ExampleStruct, tree.root);
+    testing.expect(result.an_int == 1);
+    testing.expect(result.a_float == 3.5);
+    testing.expect(std.mem.eql(i32, result.an_array, [_]i32{ 1, 2, 3, 4 }));
+    testing.expect(result.nested_struct.another_int == 6);
 }
 
 test "Test Union" {
@@ -497,6 +501,7 @@ test "Test Union" {
     var tree = try p.parse(s);
     defer tree.deinit();
 
-    var result = try tsjson(ExampleUnion, tree.root);
-    std.debug.warn("\n{}\n", result);
+    var result = try unmarshal(ExampleUnion, tree.root);
+    testing.expect(@TagType(ExampleUnion)(result) == @TagType(ExampleUnion).A);
+    testing.expect(result.A == 42);
 }
