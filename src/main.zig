@@ -2,6 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 const json = std.json;
 const ArrayList = std.ArrayList;
+const StringHashMap = std.StringHashMap;
 const math = std.math;
 const TypeInfo = @import("builtin").TypeInfo;
 
@@ -53,6 +54,136 @@ fn is_optional(comptime T: type) bool {
         .Optional => return true,
         else => return false,
     }
+}
+
+test "Test is_optional" {
+    testing.expect(is_optional(?i32));
+    testing.expect(!is_optional(i32));
+}
+
+// To find out if something is an ArrayList(S), we can just compare T == ArrayList(S)
+// Due to comptime functions beind memoized, this will work.
+// However, we need to find the item type. We do this by inspecting the items member of the ArrayList (if it is present) which is a slice of the item type.
+// If it's not an ArrayList this will either not be present or not be a slice, so we need some careful programming.
+// If ArrayList internals change this function will need updating, but the test will catch that.
+fn is_arraylist(comptime T: type) bool {
+    const type_info = @typeInfo(T);
+    const TypeInfoTag = @TagType(TypeInfo);
+    if (TypeInfoTag(type_info) != TypeInfoTag.Struct) {
+        return false;
+    }
+    comptime var has_items = false;
+    comptime var item_type: type = undefined;
+    inline for (type_info.Struct.fields) |field| {
+        if (std.mem.eql(u8, field.name, "items")) {
+            const fti = @typeInfo(field.field_type);
+            if (TypeInfoTag(fti) == TypeInfoTag.Pointer and fti.Pointer.size == TypeInfo.Pointer.Size.Slice) {
+                has_items = true;
+                item_type = fti.Pointer.child;
+            }
+        }
+    }
+    if (!has_items) {
+        return false;
+    }
+    return (T == ArrayList(item_type));
+}
+
+// As for ArrayList above, we need to inspect entries.kv.key/value for string/item type
+fn is_stringhashmap(comptime T: type) bool {
+    const type_info = @typeInfo(T);
+    const TypeInfoTag = @TagType(TypeInfo);
+    if (TypeInfoTag(type_info) != TypeInfoTag.Struct) {
+        return false;
+    }
+    comptime var has_entries = false;
+    comptime var item_type: type = undefined;
+    inline for (type_info.Struct.fields) |field| {
+        if (std.mem.eql(u8, field.name, "entries")) {
+            std.debug.warn("found entries\n");
+            const fti = @typeInfo(field.field_type);
+            if (TypeInfoTag(fti) == TypeInfoTag.Pointer and fti.Pointer.size == TypeInfo.Pointer.Size.Slice) {
+                std.debug.warn("found entries slice\n");
+                const entry_type = fti.Pointer.child;
+                const eti = @typeInfo(entry_type);
+                if (TypeInfoTag(eti) == TypeInfoTag.Struct) {
+                    std.debug.warn("found entriy struct\n");
+                    comptime var kv_type: type = undefined;
+                    comptime var has_kv = false;
+                    inline for (eti.Struct.fields) |efield| {
+                        if (std.mem.eql(u8, efield.name, "kv")) {
+                            kv_type = efield.field_type;
+                            has_kv = true;
+                        }
+                    }
+                    if (!has_kv) {
+                        std.debug.warn("no kv\n");
+                        return false;
+                    }
+                    const kvti = @typeInfo(kv_type);
+                    if (TypeInfoTag(kvti) == TypeInfoTag.Struct) {
+                        comptime var has_k = false;
+                        comptime var has_v = false;
+                        comptime var v_type: type = undefined;
+                        inline for (kvti.Struct.fields) |kvfield| {
+                            if (std.mem.eql(u8, kvfield.name, "key") and kvfield.field_type == []const u8) {
+                                has_k = true;
+                            } else if (std.mem.eql(u8, field.name, "value")) {
+                                has_v = true;
+                                v_type = kvfield.field_type;
+                            }
+                        }
+                        if (has_k and has_v) {
+                            item_type = v_type;
+                            has_entries = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    std.debug.warn("{}", has_entries);
+    if (!has_entries) {
+        return false;
+    }
+    return (T == StringHashMap(item_type));
+}
+
+test "Test is_arraylist" {
+    testing.expect(is_arraylist(ArrayList(i32)));
+
+    testing.expect(!is_arraylist(i32));
+    testing.expect(!is_arraylist([]i32));
+    testing.expect(!is_arraylist(struct {
+        items: []i32,
+    }));
+
+    const SomeNamedType = ArrayList(i32);
+    testing.expect(is_arraylist(SomeNamedType));
+    const SomeOtherNamedType = i32;
+    testing.expect(!is_arraylist(SomeOtherNamedType));
+}
+
+test "Test is_stringhashmap" {
+    testing.expect(is_stringhashmap(StringHashMap(i32)));
+
+    testing.expect(!is_stringhashmap(i32));
+    testing.expect(!is_stringhashmap(ArrayList(i32)));
+    testing.expect(!is_stringhashmap(struct {
+        entries: struct {
+            kv: struct {
+                key: i32,
+                value: i32,
+            },
+        },
+    }));
+
+    const SomeNamedType = StringHashMap(i32);
+    testing.expect(is_stringhashmap(SomeNamedType));
+    const SomeOtherNamedType = i32;
+    testing.expect(!is_stringhashmap(SomeOtherNamedType));
+    const OtherHashMap = std.AutoHashMap(i32, i32);
+    testing.expect(!is_stringhashmap(OtherHashMap));
 }
 
 fn tsjson_optional(comptime T: type, value: json.Value) TSJE!?T {
