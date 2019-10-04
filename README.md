@@ -70,7 +70,7 @@ TJP uses comptime reflection to inspect the types passed to it, and generate the
 | []const u8 | JSON String (Memory is shared with the original std.json Value) |
 | Tagged Union | JSON Object with two fields: "tag", a string with the tag name, or the integer enum value, and "value", the value for that tag |
 
-Types not listed are not supported. Additional, these standard library containers are also understood as a special case:
+Types not listed are not supported. Additionally, these standard library containers are also understood as a special case:
 
 | Zig Type | JSON Type |
 |----------|-----------|
