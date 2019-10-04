@@ -79,6 +79,10 @@ Types not listed are not supported. Additional, these standard library container
 
 3) Similarly, very deeply nested types may crash the compiler with a stack overflow.
 
+## Extensibility
+
+Since TJP operates on a std.json Value tree, any other data format that could be parsed into that form could be run through TJP to perform final unmarshalling into real Zig types.
+
 ## Future Enhancements
 
 * Better error reporting (preferably including the paths through the Zig type and JSON to where the error occurred).
