@@ -367,7 +367,7 @@ fn unmarshalPointer(comptime T: type, comptime pointer_type: TypeInfo.Pointer, v
     }
 }
 
-fn unmarshal(comptime T: type, value: json.Value, allocator: *Allocator) UnmarshalJSONError!T {
+pub fn unmarshal(comptime T: type, value: json.Value, allocator: *Allocator) UnmarshalJSONError!T {
     const type_info = @typeInfo(T);
     return switch (type_info) {
         .Bool => switch (value) {
