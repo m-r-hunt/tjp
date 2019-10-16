@@ -48,7 +48,7 @@ ExampleStruct{ .an_int = 1, .a_float = 3.5e+00, .optional = null, .an_array = i3
 Zig's package management is still a WIP at the time of writing. To use this as a package, include the source somewhere (possibly as a git submodule) and add this to your build.zig:
 
 ```zig
-lib_or_exe.addPackagePath("tjp", "path/to/tjp/src/tjp/zig");
+lib_or_exe.addPackagePath("tjp", "path/to/tjp/src/tjp.zig");
 ```
 
 Then you can `@import("tjp")` in your source files.
